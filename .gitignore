@@ -1,0 +1,6 @@
+Properties/
+.vs/
+bin/
+obj/
+icarus.csproj
+icarus.sln
