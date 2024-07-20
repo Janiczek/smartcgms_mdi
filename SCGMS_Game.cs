@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace GameDummyTest
+namespace mdi_simulator
 {
     public partial class SCGMS_Game
     {
