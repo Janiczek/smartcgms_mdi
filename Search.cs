@@ -60,7 +60,7 @@ namespace mdi_simulator
         }
         public static Simulation.Input FindBetterInput(Simulation.Input input)
         {
-            Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new BolusesSameAmount());
+            Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new IntakesSameAmount());
 
             var selection = new EliteSelection();
             var crossover = new UniformCrossover();
@@ -102,7 +102,7 @@ namespace mdi_simulator
             return input.WithBasal(intakes[0]).WithBoluses(intakes.Skip(1).ToList());
         }
     }
-    internal class BolusesSameAmount : EqualityComparer<List<Simulation.Intake>>
+    internal class IntakesSameAmount : EqualityComparer<List<Simulation.Intake>>
     {
         public override bool Equals(List<Simulation.Intake>? x, List<Simulation.Intake>? y)
         {
@@ -111,43 +111,6 @@ namespace mdi_simulator
         public override int GetHashCode([DisallowNull] List<Simulation.Intake> obj)
         {
             return obj.Select(obj => obj.amount).Aggregate(0, (a, b) => a ^ b.GetHashCode()).GetHashCode();
-        }
-    }
-    internal class BruteforceSearch
-    {
-        public static Simulation.Input FindBetterInput(Simulation.Input input)
-        {
-            // TODO: this has hardcoded 3 bolus intakes as a nested for-loop.
-            // Some other approach would be needed (streaming cartesian product?)
-            // for a more general solution.
-
-            var bolusesCount = input.bolusInsulins.Count;
-
-            var minFitness = SearchHelpers.Fitness(input, input.basalInsulin, input.bolusInsulins);
-            var minBasal = input.basalInsulin;
-            var minBoluses = input.bolusInsulins;
-            var min = Tuple.Create(minFitness, minBasal, minBoluses);
-
-            // TODO: this parallel loop results in a lot of disk thrashing -
-            // SmartCGMS is trying to write into the same file from all the
-            // various threads. We should parameterize the testlog.txt string.
-            Parallel.For(SearchHelpers.minAmount, SearchHelpers.maxAmount, (newBasalAmount) =>
-            Parallel.For(SearchHelpers.minAmount, SearchHelpers.maxAmount, (i0) =>
-            Parallel.For(SearchHelpers.minAmount, SearchHelpers.maxAmount, (i1) =>
-            Parallel.For(SearchHelpers.minAmount, SearchHelpers.maxAmount, (i2) =>
-            {
-                List<uint> amounts = [(uint)i0, (uint)i1, (uint)i2];
-                var newBasal = input.basalInsulin.WithAmount(newBasalAmount);
-                var newBoluses = input.bolusInsulins.Select((intake, index) => intake.WithAmount(amounts[index])).ToList();
-
-                var fitness = SearchHelpers.Fitness(input, newBasal, newBoluses);
-                if (fitness < min.Item1)
-                {
-                    Interlocked.Exchange(ref min, Tuple.Create(fitness, newBasal, newBoluses));
-                }
-            }))));
-
-            return input.WithBasal(min.Item2).WithBoluses(min.Item3);
         }
     }
 }
