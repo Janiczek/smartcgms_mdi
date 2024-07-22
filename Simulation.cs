@@ -1,4 +1,6 @@
-﻿namespace mdi_simulator
+﻿using System.Text;
+
+namespace mdi_simulator
 {
     internal class Simulation
     {
@@ -8,26 +10,66 @@
             BolusInsulin,
             Carbs,
         }
-        public readonly struct Intake(IntakeType type, uint timeMinutes, double amount) : IComparable<Intake>
+        public readonly struct Intake(IntakeType type,
+                                      uint timeMinutes,
+                                      double amount) : IComparable<Intake>
         {
             public readonly IntakeType type = type;
             public readonly uint timeMinutes = timeMinutes;
             public readonly double amount = amount;
 
+            // Used for easier addition to PriorityQueue
             public int CompareTo(Intake other) => timeMinutes.CompareTo(other.timeMinutes);
+
+            public override string ToString()
+            {
+                string unit = type switch
+                {
+                    IntakeType.BasalInsulin => "U",
+                    IntakeType.BolusInsulin => "U",
+                    IntakeType.Carbs => "g",
+                    _ => throw new NotImplementedException("wut"),
+                };
+
+                string hh = (timeMinutes / 60).ToString().PadLeft(2, '0');
+                string mm = (timeMinutes % 60).ToString().PadLeft(2, '0');
+
+                return $"{hh}:{mm} - {amount} {unit}";
+            }
         }
-        public readonly struct Input(Intake basalInsulin, List<Intake> bolusInsulins, List<Intake> carbs)
+        public readonly struct Input(Intake basalInsulin,
+                                     List<Intake> bolusInsulins,
+                                     List<Intake> carbs)
         {
+            public readonly Intake basalInsulin = basalInsulin;
+            public readonly List<Intake> bolusInsulins = bolusInsulins;
+            public readonly List<Intake> carbs = carbs;
+
+            public Input WithBoluses(List<Intake> newBoluses) => new(basalInsulin, newBoluses, carbs);
+
+            public List<Intake> ToList() => new List<Intake> { basalInsulin }.Concat(bolusInsulins).Concat(carbs).ToList();
+
             public PriorityQueue<Intake, Intake> ToPriorityQueue()
             {
                 PriorityQueue<Intake, Intake> queue = new();
-                queue.Enqueue(basalInsulin, basalInsulin);
-                bolusInsulins.ForEach(i => queue.Enqueue(i, i));
-                carbs.ForEach(i => queue.Enqueue(i, i));
+                ToList().ForEach(i => queue.Enqueue(i, i));
                 return queue;
             }
+
+            public override string ToString()
+            {
+                StringBuilder sb = new();
+                sb.AppendLine($"Basal insulin: {basalInsulin}");
+                bolusInsulins.ForEach(i => sb.AppendLine($"Bolus insulin: {i}"));
+                carbs.ForEach(i => sb.AppendLine($"Carbs: {i}"));
+                return sb.ToString();
+            }
         }
-        public readonly struct OutputRow(double minute, double bloodGlucose, double carbohydratesOnBoard, double insulinOnBoard, double interstitialGlucose)
+        public readonly struct OutputRow(double minute,
+                                         double bloodGlucose,
+                                         double carbohydratesOnBoard,
+                                         double insulinOnBoard,
+                                         double interstitialGlucose)
         {
             public readonly double minute = minute;
             public readonly double bloodGlucose = bloodGlucose;
@@ -44,18 +86,8 @@
             List<OutputRow> output = [];
             SCGMS_Game game = new(1, 1, 60 * 1000, logFile);
 
-            // TODO: is the current time right after initializing the game 00:00:00 - midnight?
-            // Does the model even care? (Dawn phenomenon)
-
-            // TODO: try simulating eg. 5 days, to let the basal insulin stabilize. Toujeo docs say it does take ~5 days.
-            // Or maybe somehow put the existing insulin on board into the init state of the model?
-            // Don't forget to copy the intakes each day. We only have them planned for the first day in the Intake.
-
             for (uint day = 0; day < days; day++)
             {
-
-                Console.WriteLine($"Day {day + 1} of {days}");
-
                 uint minsCurrent = 0;
                 uint minsTarget = 24 * 60;
                 uint today = day * minsTarget;
@@ -72,25 +104,23 @@
                         minsCurrent++;
                     }
 
-                    // TODO is the 0 value for the time parameter of the Schedule... methods OK?
                     switch (nextIntake.type)
                     {
                         case IntakeType.BasalInsulin:
-                            // TODO: Basal _rate_? How to convert my one-time injection to a rate?
-                            // It's U/hr instead of U, so I'm assuming I can divide by 24.
-                            // It probably then adds an assumption that it's linear, but Toujeo isn't linear. (It tries to be though.)
+                            // TODO: later when the basal insulin is available in the model
+                            // as an one-time injection, use _that_ instead of Schedule..Rate
                             game.ScheduleInsulinBasalRate(nextIntake.amount / 24, 0);
                             break;
                         case IntakeType.BolusInsulin:
                             game.ScheduleInsulinBolus(nextIntake.amount, 0);
                             break;
                         case IntakeType.Carbs:
-                            game.ScheduleCarbohydratesIntake(nextIntake.amount, 0);
+                            game.ScheduleCarbohydratesIntake(nextIntake.amount, 1);
                             break;
                     }
                 }
 
-                // Finish the rest of the simulation
+                // Simulate the rest of the day
                 for (uint minsLeft = minsTarget - minsCurrent; minsLeft > 0; minsLeft--)
                 {
                     game.Step();
@@ -110,13 +140,12 @@
         public static Input ExampleInput = new(
             new(IntakeType.BasalInsulin, 22 * Hour, 32),
             [
-                new(IntakeType.BolusInsulin, 9 * Hour, 18),
+                new(IntakeType.BolusInsulin, 10 * Hour, 18),
                 new(IntakeType.BolusInsulin, 13 * Hour, 22),
                 new(IntakeType.BolusInsulin, 19 * Hour, 21),
             ],
             [
                 new(IntakeType.Carbs, 10 * Hour, 24),
-                new(IntakeType.Carbs, 12 * Hour, 12),
                 new(IntakeType.Carbs, 13 * Hour, 60),
                 new(IntakeType.Carbs, 19 * Hour, 60),
                 new(IntakeType.Carbs, 22 * Hour, 24),

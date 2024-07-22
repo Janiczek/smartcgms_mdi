@@ -7,19 +7,28 @@ namespace mdi_simulator
 {
     public partial class SimulationForm : Form
     {
-        private PlotView plot;
+        private Simulation.Input input = Simulation.ExampleInput;
 
         public SimulationForm()
         {
             InitializeComponent();
-            plot!.Model = MakeModel(Simulation.ExampleInput);
+            RefreshLayout();
+        }
+        
+        private void RefreshLayout()
+        {
+            inputLabel.Text = input.ToString();
+            plot.Model = MakeModel(input);
         }
 
-
         private const uint days = 5;
+        private const uint maxY = 50;
         private static PlotModel MakeModel(Simulation.Input input)
         {
-            var model = new PlotModel { Title = "Simulation Results" };
+            var model = new PlotModel
+            {
+                Title = "Simulation Results",
+            };
 
             model.Axes.Add(new OxyPlot.Axes.LinearAxis
             {
@@ -42,7 +51,8 @@ namespace mdi_simulator
             // Add vertical line annotations for each day's midnight
             for (int i = 1; i <= days; i++)
             {
-                model.Annotations.Add(new LineAnnotation {
+                model.Annotations.Add(new LineAnnotation
+                {
                     Type = LineAnnotationType.Vertical,
                     X = i * 24 * 60,
                     Color = OxyColors.Black,
@@ -56,7 +66,7 @@ namespace mdi_simulator
                 MinimumX = 0,
                 MaximumX = days * 24 * 60,
                 MinimumY = 10,
-                MaximumY = 20,
+                MaximumY = maxY,
                 Fill = OxyColor.FromAColor(30, OxyColors.Red),
                 StrokeThickness = 0,
             });
@@ -76,10 +86,60 @@ namespace mdi_simulator
             {
                 Title = "Blood Glucose",
             };
-
             output.ForEach(row => seriesBloodGlucose.Points.Add(new DataPoint(row.minute, row.bloodGlucose)));
-
             model.Series.Add(seriesBloodGlucose);
+
+            for (int i = 0; i < days; i++)
+            {
+                input.ToList().ForEach(input =>
+                {
+                    var color = input.type switch
+                    {
+                        Simulation.IntakeType.BasalInsulin => OxyColors.Red,
+                        Simulation.IntakeType.BolusInsulin => OxyColors.Green,
+                        Simulation.IntakeType.Carbs => OxyColors.Blue,
+                        _ => throw new NotImplementedException("wut"),
+                    };
+
+                    var textY = input.type switch
+                    {
+                        Simulation.IntakeType.BasalInsulin => 0.5,
+                        Simulation.IntakeType.BolusInsulin => 1.25,
+                        Simulation.IntakeType.Carbs => 2,
+                        _ => throw new NotImplementedException("wut"),
+                    };
+
+                    var text = input.type switch
+                    {
+                        Simulation.IntakeType.BasalInsulin => "B",
+                        Simulation.IntakeType.BolusInsulin => "I",
+                        Simulation.IntakeType.Carbs => "C",
+                        _ => throw new NotImplementedException("wut"),
+                    };
+
+                    var opacity = (byte)(i == 0 ? 255 : 50);
+                    var colorWithOpacity = OxyColor.FromAColor(opacity, color);
+
+                    model.Annotations.Add(new LineAnnotation
+                    {
+                        Type = LineAnnotationType.Vertical,
+                        X = i * 24 * 60 + input.timeMinutes,
+                        Color = colorWithOpacity,
+                        LineStyle = LineStyle.Solid,
+                        MaximumY = 4,
+                    });
+
+                    model.Annotations.Add(new TextAnnotation
+                    {
+                        Text = text,
+                        TextPosition = new DataPoint(i * 24 * 60 + input.timeMinutes, textY),
+                        TextColor = colorWithOpacity,
+                        Font = "Consolas",
+                        StrokeThickness = 0,
+                    });
+
+                });
+            }
 
             return model;
         }
@@ -93,9 +153,13 @@ namespace mdi_simulator
         private void InitializeComponent()
         {
             plot = new PlotView();
+            inputLabel = new Label();
+            searchButton = new Button();
             SuspendLayout();
-
-            plot.Dock = DockStyle.Fill;
+            // 
+            // plot
+            // 
+            plot.Dock = DockStyle.Left;
             plot.Location = new Point(0, 0);
             plot.Margin = new Padding(4, 3, 4, 3);
             plot.Name = "plot";
@@ -106,16 +170,54 @@ namespace mdi_simulator
             plot.ZoomHorizontalCursor = Cursors.SizeWE;
             plot.ZoomRectangleCursor = Cursors.SizeNWSE;
             plot.ZoomVerticalCursor = Cursors.SizeNS;
-
+            // 
+            // inputLabel
+            // 
+            inputLabel.Location = new Point(927, 9);
+            inputLabel.Name = "inputLabel";
+            inputLabel.Size = new Size(228, 313);
+            inputLabel.TabIndex = 1;
+            inputLabel.Text = "label1";
+            // 
+            // searchButton
+            // 
+            searchButton.Location = new Point(927, 325);
+            searchButton.Name = "searchButton";
+            searchButton.Size = new Size(228, 23);
+            searchButton.TabIndex = 2;
+            searchButton.Text = "Search for better boluses";
+            searchButton.UseVisualStyleBackColor = true;
+            searchButton.Click += searchButton_Click;
+            // 
+            // SimulationForm
+            // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(920, 360);
+            ClientSize = new Size(1167, 360);
+            Controls.Add(searchButton);
+            Controls.Add(inputLabel);
             Controls.Add(plot);
             Margin = new Padding(4, 3, 4, 3);
-            Name = "MDI Simulator";
+            Name = "SimulationForm";
             Text = "MDI Simulator";
-
             ResumeLayout(false);
+        }
+
+        private PlotView plot;
+        private Label inputLabel;
+        private Button searchButton;
+
+        private void searchButton_Click(object sender, EventArgs e)
+        {
+            searchButton.Enabled = false;
+
+            //List<Simulation.Intake> betterIntakes = BruteforceSearch.FindBetterBoluses(input);
+            List<Simulation.Intake> betterIntakes = GeneticSearch.FindBetterBoluses(input);
+            Simulation.Input newInput = input.WithBoluses(betterIntakes);
+            input = newInput;
+            RefreshLayout();
+
+            searchButton.Enabled = true;
         }
     }
 }
