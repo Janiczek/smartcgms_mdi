@@ -27,22 +27,24 @@ namespace mdi_simulator
 
             // TODO also check hypo/hyper for the skipped days, but with less weight
 
-            // TODO new consideration:
-            // var amplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
+            var amplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
 
             var hypoWeight = 1.0;
             var hyperWeight = 0.8;
             var totalInsulinWeight = 0.3;
+            var amplitudeWeight = 0.5;
 
             var hypoNormalized = hypoCount / (double)dayMinutes;                     // 0..1
             var hyperNormalized = hyperCount / (double)dayMinutes;                   // 0..1
             var totalInsulinNormalized = totalInsulin / (maxAmount * boluses.Count); // 0..1
+            var amplitudeNormalized = amplitude >= 6 ? 1 : amplitude / 6;            // 0..1
 
-            var weights = hypoWeight + hyperWeight + totalInsulinWeight;
+            var weights = hypoWeight + hyperWeight + totalInsulinWeight + amplitudeWeight;
 
             return (hypoNormalized * hypoWeight
                 + hyperNormalized * hyperWeight
-                + totalInsulinNormalized * totalInsulinWeight) / weights; // 0..1
+                + totalInsulinNormalized * totalInsulinWeight
+                + amplitudeNormalized * amplitudeWeight) / weights; // 0..1
         }
     }
     internal class GeneticSearch
