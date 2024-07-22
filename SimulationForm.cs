@@ -185,7 +185,7 @@ namespace mdi_simulator
             searchButton.Name = "searchButton";
             searchButton.Size = new Size(228, 23);
             searchButton.TabIndex = 2;
-            searchButton.Text = "Search for better boluses";
+            searchButton.Text = "Search for better dosage";
             searchButton.UseVisualStyleBackColor = true;
             searchButton.Click += searchButton_Click;
             // 
@@ -211,10 +211,7 @@ namespace mdi_simulator
         {
             searchButton.Enabled = false;
 
-            //List<Simulation.Intake> betterIntakes = BruteforceSearch.FindBetterBoluses(input);
-            List<Simulation.Intake> betterIntakes = GeneticSearch.FindBetterBoluses(input);
-            Simulation.Input newInput = input.WithBoluses(betterIntakes);
-            input = newInput;
+            input = GeneticSearch.FindBetterInput(input);
             RefreshLayout();
 
             searchButton.Enabled = true;

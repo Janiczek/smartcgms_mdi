@@ -18,6 +18,8 @@ namespace mdi_simulator
             public readonly uint timeMinutes = timeMinutes;
             public readonly double amount = amount;
 
+            public Intake WithAmount(double newAmount) => new(type, timeMinutes, newAmount);
+
             // Used for easier addition to PriorityQueue
             public int CompareTo(Intake other) => timeMinutes.CompareTo(other.timeMinutes);
 
@@ -46,6 +48,7 @@ namespace mdi_simulator
             public readonly List<Intake> carbs = carbs;
 
             public Input WithBoluses(List<Intake> newBoluses) => new(basalInsulin, newBoluses, carbs);
+            public Input WithBasal(Intake newBasal) => new(newBasal, bolusInsulins, carbs);
 
             public List<Intake> ToList() => new List<Intake> { basalInsulin }.Concat(bolusInsulins).Concat(carbs).ToList();
 
