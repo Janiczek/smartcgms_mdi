@@ -1,4 +1,5 @@
 ﻿using GeneticSharp;
+using System.Diagnostics.CodeAnalysis;
 
 namespace mdi_simulator
 {
@@ -9,20 +10,39 @@ namespace mdi_simulator
          */
         public const uint minAmount = 0;
         public const uint maxAmount = 40;
-        /* <0,...>, we're trying to minimize this one.
+        /* 0..1, we're trying to minimize this one.
          * Usable for BruteforceSearch as is, but for GeneticSearch we need to negate it first.
          */
         public static double Fitness(Simulation.Input input, List<Simulation.Intake> boluses)
         {
             var inputWithBoluses = input.WithBoluses(boluses);
 
+            var dayMinutes = 24 * 60;
             var output = Simulation.Simulate(inputWithBoluses, 3);
+            var lastDay = output.Skip(output.Count - dayMinutes); // Let's check the day where the insulin has stabilized
 
-            var timeHypo = output.Count(r => r.bloodGlucose < 4);
-            var timeHyper = output.Count(r => r.bloodGlucose >= 10);
+            var hypoCount = lastDay.Count(r => r.bloodGlucose < 4);    // 0..output.Count
+            var hyperCount = lastDay.Count(r => r.bloodGlucose >= 10); // 0..output.Count
+            var totalInsulin = boluses.Select((i) => i.amount).Sum();  // minAmount..maxAmount*boluses.Count
 
-            var fitness = timeHypo + timeHyper * 0.8 + boluses.Select((i) => i.amount).Sum();
-            return fitness;
+            // TODO also check hypo/hyper for the skipped days, but with less weight
+
+            // TODO new consideration:
+            // var amplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
+
+            var hypoWeight = 1.0;
+            var hyperWeight = 0.8;
+            var totalInsulinWeight = 0.3;
+
+            var hypoNormalized = hypoCount / (double)dayMinutes;                     // 0..1
+            var hyperNormalized = hyperCount / (double)dayMinutes;                   // 0..1
+            var totalInsulinNormalized = totalInsulin / (maxAmount * boluses.Count); // 0..1
+
+            var weights = hypoWeight + hyperWeight + totalInsulinWeight;
+
+            return (hypoNormalized * hypoWeight
+                + hyperNormalized * hyperWeight
+                + totalInsulinNormalized * totalInsulinWeight) / weights; // 0..1
         }
     }
     internal class GeneticSearch
@@ -41,20 +61,22 @@ namespace mdi_simulator
         }
         public static List<Simulation.Intake> FindBetterBoluses(Simulation.Input input)
         {
-            Dictionary<IChromosome,double> fitnessCache = new();
+            Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new BolusesSameAmount());
 
             var selection = new EliteSelection();
             var crossover = new UniformCrossover();
             var mutation = new FlipBitMutation();
             var fitness = new FuncFitness((c) =>
             {
-                if (fitnessCache.ContainsKey(c)) return fitnessCache[c];
-
                 var fc = c as FloatingPointChromosome;
                 var boluses = BolusesFromChromosome(input, fc!);
+
+                if (fitnessCache.TryGetValue(boluses, out var cachedFitness))
+                    return cachedFitness;
+
                 var fitness = -SearchHelpers.Fitness(input, boluses);
 
-                fitnessCache.Add(c, fitness);
+                fitnessCache.Add(boluses, fitness);
                 return fitness;
             });
 
@@ -76,6 +98,18 @@ namespace mdi_simulator
             var fc = ga.BestChromosome as FloatingPointChromosome;
             var boluses = BolusesFromChromosome(input, fc!);
             return boluses;
+        }
+    }
+    internal class BolusesSameAmount : EqualityComparer<List<Simulation.Intake>>
+    {
+        public override bool Equals(List<Simulation.Intake>? x, List<Simulation.Intake>? y)
+        {
+            return x.Zip(y, (a, b) => a.amount == b.amount).All(b => b);
+        }
+
+        public override int GetHashCode([DisallowNull] List<Simulation.Intake> obj)
+        {
+            return obj.Select(obj => obj.amount).Aggregate(0, (a, b) => a ^ b.GetHashCode()).GetHashCode();
         }
     }
     internal class BruteforceSearch
