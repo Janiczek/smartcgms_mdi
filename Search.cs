@@ -49,17 +49,13 @@ namespace mdi_simulator
     }
     internal class GeneticSearch
     {
-        private static List<Simulation.Intake> IntakeAmountsFromChromosome(Simulation.Input input, FloatingPointChromosome c)
-        {
-            var values = c.ToFloatingPoints();
+        public GeneticAlgorithm ga;
+        private Simulation.Input input;
 
-            var basal = input.basalInsulin.WithAmount(values[0]);
-            var boluses = input.bolusInsulins.Select((intake, index) => intake.WithAmount(values[index + 1])).ToList();
-
-            return [basal, .. boluses];
-        }
-        public static Simulation.Input FindBetterInput(Simulation.Input input)
+        public GeneticSearch(Simulation.Input input_)
         {
+            input = input_;
+
             Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new IntakesSameAmount());
 
             var selection = new EliteSelection();
@@ -92,14 +88,29 @@ namespace mdi_simulator
             );
             var population = new Population(50, 100, chromosome);
 
-            var ga = new GeneticAlgorithm(population, fitness, selection, crossover, mutation);
+            ga = new GeneticAlgorithm(population, fitness, selection, crossover, mutation);
             ga.Termination = new FitnessStagnationTermination(100);
+        }
 
-            ga.Start();
+        private static List<Simulation.Intake> IntakeAmountsFromChromosome(Simulation.Input input, FloatingPointChromosome c)
+        {
+            var values = c.ToFloatingPoints();
 
-            var fc = ga.BestChromosome as FloatingPointChromosome;
+            var basal = input.basalInsulin.WithAmount(values[0]);
+            var boluses = input.bolusInsulins.Select((intake, index) => intake.WithAmount(values[index + 1])).ToList();
+
+            return [basal, .. boluses];
+        }
+        public static Simulation.Input InputFromChromosome(Simulation.Input input, IChromosome c)
+        {
+            var fc = c as FloatingPointChromosome;
             var intakes = IntakeAmountsFromChromosome(input, fc!);
             return input.WithBasal(intakes[0]).WithBoluses(intakes.Skip(1).ToList());
+        }
+        public Simulation.Input FindBetterInput()
+        {
+            ga.Start();
+            return InputFromChromosome(input, ga.BestChromosome);
         }
     }
     internal class IntakesSameAmount : EqualityComparer<List<Simulation.Intake>>

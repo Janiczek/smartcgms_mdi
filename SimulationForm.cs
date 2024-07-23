@@ -7,7 +7,8 @@ namespace mdi_simulator
 {
     public partial class SimulationForm : Form
     {
-        private Simulation.Input input = Simulation.ExampleInput;
+        private Simulation.Input originalInput = Simulation.ExampleInput;
+        private Simulation.Input bestInput = Simulation.ExampleInput;
 
         public SimulationForm()
         {
@@ -17,13 +18,13 @@ namespace mdi_simulator
         
         private void RefreshLayout()
         {
-            inputLabel.Text = input.ToString();
-            plot.Model = MakeModel(input);
+            inputLabel.Text = $"Original:\n{originalInput}\nBest:\n{bestInput}";
+            plot.Model = MakeModel();
         }
 
         private const uint days = 5;
         private const uint maxY = 50;
-        private static PlotModel MakeModel(Simulation.Input input)
+        private PlotModel MakeModel()
         {
             var model = new PlotModel
             {
@@ -80,18 +81,19 @@ namespace mdi_simulator
                 StrokeThickness = 0,
             });
 
-            var output = Simulation.Simulate(input, days);
+            var originalOutput = Simulation.Simulate(originalInput, days);
+            var bestOutput = Simulation.Simulate(bestInput, days);
 
-            var seriesBloodGlucose = new LineSeries
-            {
-                Title = "Blood Glucose",
-            };
-            output.ForEach(row => seriesBloodGlucose.Points.Add(new DataPoint(row.minute, row.bloodGlucose)));
-            model.Series.Add(seriesBloodGlucose);
+            var seriesOriginalGlucose = new LineSeries { Title = "Original glucose", Color = OxyColor.FromAColor(75,OxyColors.OrangeRed) };
+            var seriesBestGlucose = new LineSeries { Title = "Best glucose", Color = OxyColors.Green };
+            originalOutput.ForEach(row => seriesOriginalGlucose.Points.Add(new DataPoint(row.minute, row.bloodGlucose)));
+            bestOutput.ForEach(row => seriesBestGlucose.Points.Add(new DataPoint(row.minute, row.bloodGlucose)));
+            model.Series.Add(seriesOriginalGlucose);
+            model.Series.Add(seriesBestGlucose);
 
             for (int i = 0; i < days; i++)
             {
-                input.ToList().ForEach(input =>
+                originalInput.ToList().ForEach(input =>
                 {
                     var color = input.type switch
                     {
@@ -210,11 +212,31 @@ namespace mdi_simulator
         private void searchButton_Click(object sender, EventArgs e)
         {
             searchButton.Enabled = false;
+            searchButton.UseWaitCursor = true;
+            searchButton.Text = "Searching...";
 
-            input = GeneticSearch.FindBetterInput(input);
-            RefreshLayout();
+            var search = new GeneticSearch(originalInput);
+            search.ga.Population.BestChromosomeChanged += (_, _) =>
+            {
+                bestInput = GeneticSearch.InputFromChromosome(originalInput, search.ga.BestChromosome);
+                Invoke((MethodInvoker)delegate
+                {
+                    RefreshLayout();
+                });
+            };
 
-            searchButton.Enabled = true;
+            Task searchTask = Task.Run(() =>
+            {
+                bestInput = search.FindBetterInput();
+                this.Invoke((MethodInvoker)delegate
+                {
+                    RefreshLayout();
+                    searchButton.UseWaitCursor = false;
+                    searchButton.Enabled = true;
+                    searchButton.Text = "Search for better dosage";
+                });
+
+            });
         }
     }
 }
