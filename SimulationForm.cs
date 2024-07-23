@@ -24,7 +24,7 @@ namespace mdi_simulator
 Best:
 Basal: {bestInput.basalInsulin.amount}
 Boluses: {string.Join(",", bestInput.bolusInsulins.Select((i) => i.amount))}
-Fitness: {SearchHelpers.Fitness(bestInput, bestInput.basalInsulin, bestInput.bolusInsulins)}";
+Fitness: {SearchHelpers.Fitness(bestInput)}";
             plot.Model = MakeModel();
         }
 
@@ -215,33 +215,57 @@ Fitness: {SearchHelpers.Fitness(bestInput, bestInput.basalInsulin, bestInput.bol
         private Label inputLabel;
         private Button searchButton;
 
+        private MarkovChainSearch search;
         private void searchButton_Click(object sender, EventArgs e)
         {
             searchButton.Enabled = false;
             searchButton.UseWaitCursor = true;
             searchButton.Text = "Searching...";
 
-            var search = new GeneticSearch(originalInput);
-            search.ga.Population.BestChromosomeChanged += (_, _) =>
+            //var search = new GeneticSearch(originalInput);
+            //search.ga.Population.BestChromosomeChanged += (_, _) =>
+            //{
+            //    bestInput = GeneticSearch.InputFromChromosome(originalInput, search.ga.BestChromosome);
+            //    Invoke((MethodInvoker)delegate
+            //    {
+            //        RefreshLayout();
+            //    });
+            //};
+
+            //Task searchTask = Task.Run(() =>
+            //{
+            //    bestInput = search.FindBetterInput();
+            //    this.Invoke((MethodInvoker)delegate
+            //    {
+            //        RefreshLayout();
+            //        searchButton.UseWaitCursor = false;
+            //        searchButton.Enabled = true;
+            //        searchButton.Text = "Search for better dosage";
+            //    });
+            //});
+            if (search == null)
             {
-                bestInput = GeneticSearch.InputFromChromosome(originalInput, search.ga.BestChromosome);
-                Invoke((MethodInvoker)delegate
+                search = new MarkovChainSearch(bestInput);
+                search.OnBetterInput += (_, betterInput) =>
                 {
-                    RefreshLayout();
-                });
-            };
+                    bestInput = betterInput;
+                    Invoke((MethodInvoker)delegate
+                    {
+                        RefreshLayout();
+                    });
+                };
+            }
 
             Task searchTask = Task.Run(() =>
             {
                 bestInput = search.FindBetterInput();
-                this.Invoke((MethodInvoker)delegate
+                Invoke((MethodInvoker)delegate
                 {
                     RefreshLayout();
                     searchButton.UseWaitCursor = false;
                     searchButton.Enabled = true;
                     searchButton.Text = "Search for better dosage";
                 });
-
             });
         }
     }

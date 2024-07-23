@@ -10,21 +10,19 @@ namespace mdi_simulator
         /* 0..1, we're trying to minimize this one.
          * Usable for BruteforceSearch as is, but for GeneticSearch we need to negate it first.
          */
-        public static double Fitness(Simulation.Input input, Simulation.Intake basal, List<Simulation.Intake> boluses)
+        public static double Fitness(Simulation.Input input)
         {
-            var updatedInput = input.WithBoluses(boluses).WithBasal(basal);
-
             uint days = 3;
             var dayMinutes = 24 * 60;
-            var output = Simulation.Simulate(updatedInput, days);
+            var output = Simulation.Simulate(input, days);
             var initialDays = output.Take((int)(days - 1) * dayMinutes);
             var lastDay = output.Skip(output.Count - dayMinutes);
 
             var longtermHypoCount = lastDay.Count(r => r.bloodGlucose < 4);
             var longtermHyperCount = lastDay.Count(r => r.bloodGlucose >= 10);
             var longtermAmplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
-            var totalBolusInsulin = boluses.Select((i) => i.amount).Sum(); // minAmount..maxAmount
-            var basalInsulin = basal.amount; // minAmount..maxAmount
+            var totalBolusInsulin = input.bolusInsulins.Select((i) => i.amount).Sum(); // minAmount..maxAmount
+            var basalInsulin = input.basalInsulin.amount; // minAmount..maxAmount
             var initialHypoCount = initialDays.Count(r => r.bloodGlucose < 4);
             var initialHyperCount = initialDays.Count(r => r.bloodGlucose >= 10);
 
@@ -39,7 +37,7 @@ namespace mdi_simulator
             var longtermHypoNormalized = longtermHypoCount / (double)lastDay.Count(); // 0..1
             var longtermHyperNormalized = longtermHyperCount / (double)lastDay.Count(); // 0..1
             var longtermAmplitudeNormalized = longtermAmplitude >= 6 ? 1 : (double)(longtermAmplitude / 6); // 0..1
-            var totalBolusInsulinNormalized = totalBolusInsulin / (maxAmount * boluses.Count); // 0..1
+            var totalBolusInsulinNormalized = totalBolusInsulin / (maxAmount * input.bolusInsulins.Count); // 0..1
             var basalInsulinNormalized = basalInsulin / maxAmount; // 0..1
             var initialHypoNormalized = initialHypoCount / (double)initialDays.Count(); // 0..1
             var initialHyperNormalized = initialHyperCount / (double)initialDays.Count(); // 0..1
@@ -54,18 +52,6 @@ namespace mdi_simulator
                 + initialHypoNormalized * initialHypoWeight
                 + initialHyperNormalized * initialHyperWeight
                 ) / weights; // 0..1
-            
-
-            // Interesting values we've ended up on (2024-07-23):
-            //
-            // OLD FITNESS FUNCTION
-            // 15 / 29,1,18
-            // 16 / 28,1,19
-            // 15 / 27,4,19
-            // 17 / 23,6,18
-            // 29 / 16,4,8 
-            //
-            // NEW FITNESS FUNCTION:
         }
     }
     internal class GeneticSearch
@@ -91,7 +77,8 @@ namespace mdi_simulator
 
                 var basal = amounts[0];
                 var boluses = amounts.Skip(1).ToList();
-                var fitness = -SearchHelpers.Fitness(input, basal, boluses);
+                var newInput = input.WithBasal(basal).WithBoluses(boluses);
+                var fitness = -SearchHelpers.Fitness(newInput);
 
                 fitnessCache.Add(amounts, fitness);
                 return fitness;
@@ -144,6 +131,66 @@ namespace mdi_simulator
         public override int GetHashCode([DisallowNull] List<Simulation.Intake> obj)
         {
             return obj.Select(obj => obj.amount).Aggregate(0, (a, b) => a ^ b.GetHashCode()).GetHashCode();
+        }
+    }
+    internal class MarkovChainSearch
+    {
+        private Simulation.Input originalInput;
+        private Simulation.Input currentInput;
+        private double currentFitness;
+        private Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new IntakesSameAmount());
+
+        public MarkovChainSearch(Simulation.Input originalInput_)
+        {
+            originalInput = originalInput_;
+            currentInput = originalInput_;
+            currentFitness = SearchHelpers.Fitness(currentInput);
+        }
+
+        public event EventHandler<Simulation.Input> OnBetterInput;
+
+        public Simulation.Input FindBetterInput()
+        {
+            var random = new Random();
+
+            var stepSingle = (double currAmount) =>
+            {
+                var delta = random.Next(-2, 2);
+                double propAmount = currAmount + delta;
+                if (propAmount < SearchHelpers.minAmount) propAmount = SearchHelpers.minAmount;
+                if (propAmount > SearchHelpers.maxAmount) propAmount = SearchHelpers.maxAmount;
+                return propAmount;
+            };
+
+            var numSteps = 100;
+
+            for (var i = 0; i < numSteps; i++)
+            {
+                Simulation.Input propInput =
+                    currentInput
+                        .WithBasal(currentInput.basalInsulin.WithAmount(stepSingle(currentInput.basalInsulin.amount)))
+                        .WithBoluses(currentInput.bolusInsulins.Select(i => i.WithAmount(stepSingle(i.amount))).ToList());
+
+                List<Simulation.Intake> amounts = [propInput.basalInsulin, .. propInput.bolusInsulins];
+
+                double propFitness;
+                if (fitnessCache.TryGetValue(amounts, out var cachedFitness))
+                    propFitness = cachedFitness;
+                else
+                {
+                    propFitness = SearchHelpers.Fitness(propInput);
+                    fitnessCache.Add(amounts, propFitness);
+                }
+
+                if (propFitness < currentFitness)
+                {
+                    currentInput = propInput;
+                    currentFitness = propFitness;
+                    OnBetterInput.Invoke(this, propInput);
+                }
+            }
+
+            return currentInput;
         }
     }
 }
