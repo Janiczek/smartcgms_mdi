@@ -18,7 +18,13 @@ namespace mdi_simulator
         
         private void RefreshLayout()
         {
-            inputLabel.Text = $"Original:\n{originalInput}\nBest:\n{bestInput}";
+            inputLabel.Text = $@"Original:
+{originalInput}
+
+Best:
+Basal: {bestInput.basalInsulin.amount}
+Boluses: {string.Join(",", bestInput.bolusInsulins.Select((i) => i.amount))}
+Fitness: {SearchHelpers.Fitness(bestInput, bestInput.basalInsulin, bestInput.bolusInsulins)}";
             plot.Model = MakeModel();
         }
 

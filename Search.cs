@@ -5,11 +5,8 @@ namespace mdi_simulator
 {
     internal class SearchHelpers
     {
-        /* Let's cap the insulin injection amount around 40.
-         * We might need to make the maximum higher for the basal insulin.
-         */
         public const uint minAmount = 0;
-        public const uint maxAmount = 40;
+        public const uint maxAmount = 50;
         /* 0..1, we're trying to minimize this one.
          * Usable for BruteforceSearch as is, but for GeneticSearch we need to negate it first.
          */
@@ -17,50 +14,73 @@ namespace mdi_simulator
         {
             var updatedInput = input.WithBoluses(boluses).WithBasal(basal);
 
+            uint days = 3;
             var dayMinutes = 24 * 60;
-            var output = Simulation.Simulate(updatedInput, 3);
-            var lastDay = output.Skip(output.Count - dayMinutes); // Let's check the day where the insulin has stabilized
+            var output = Simulation.Simulate(updatedInput, days);
+            var initialDays = output.Take((int)(days - 1) * dayMinutes);
+            var lastDay = output.Skip(output.Count - dayMinutes);
 
-            var hypoCount = lastDay.Count(r => r.bloodGlucose < 4);                  // 0..output.Count
-            var hyperCount = lastDay.Count(r => r.bloodGlucose >= 10);               // 0..output.Count
-            var totalInsulin = basal.amount + boluses.Select((i) => i.amount).Sum(); // minAmount..maxAmount*boluses.Count
+            var longtermHypoCount = lastDay.Count(r => r.bloodGlucose < 4);
+            var longtermHyperCount = lastDay.Count(r => r.bloodGlucose >= 10);
+            var longtermAmplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
+            var totalBolusInsulin = boluses.Select((i) => i.amount).Sum(); // minAmount..maxAmount
+            var basalInsulin = basal.amount; // minAmount..maxAmount
+            var initialHypoCount = initialDays.Count(r => r.bloodGlucose < 4);
+            var initialHyperCount = initialDays.Count(r => r.bloodGlucose >= 10);
 
-            // TODO also check hypo/hyper for the skipped days, but with less weight
+            double longtermHypoWeight = 15;
+            double longtermHyperWeight = 12;
+            double longtermAmplitudeWeight = 6;
+            double totalBolusInsulinWeight = 4;
+            double basalInsulinWeight = 2;
+            double initialHypoWeight = 2;
+            double initialHyperWeight = 1;
 
-            var amplitude = lastDay.Max(r => r.bloodGlucose) - lastDay.Min(r => r.bloodGlucose); // ideally around 3-4, 6+ is bad
+            var longtermHypoNormalized = longtermHypoCount / (double)lastDay.Count(); // 0..1
+            var longtermHyperNormalized = longtermHyperCount / (double)lastDay.Count(); // 0..1
+            var longtermAmplitudeNormalized = longtermAmplitude >= 6 ? 1 : (double)(longtermAmplitude / 6); // 0..1
+            var totalBolusInsulinNormalized = totalBolusInsulin / (maxAmount * boluses.Count); // 0..1
+            var basalInsulinNormalized = basalInsulin / maxAmount; // 0..1
+            var initialHypoNormalized = initialHypoCount / (double)initialDays.Count(); // 0..1
+            var initialHyperNormalized = initialHyperCount / (double)initialDays.Count(); // 0..1
 
-            var hypoWeight = 1.0;
-            var hyperWeight = 0.8;
-            var totalInsulinWeight = 0.3;
-            var amplitudeWeight = 0.5;
+            var weights = longtermHypoWeight + longtermHyperWeight + initialHypoWeight + initialHyperWeight + longtermAmplitudeWeight + totalBolusInsulinWeight + basalInsulinWeight;
 
-            var hypoNormalized = hypoCount / (double)dayMinutes;                           // 0..1
-            var hyperNormalized = hyperCount / (double)dayMinutes;                         // 0..1
-            var totalInsulinNormalized = totalInsulin / (maxAmount * (1 + boluses.Count)); // 0..1
-            var amplitudeNormalized = amplitude >= 6 ? 1 : amplitude / 6;                  // 0..1
+            return (longtermHypoNormalized * longtermHypoWeight
+                + longtermHyperNormalized * longtermHyperWeight
+                + longtermAmplitudeNormalized * longtermAmplitudeWeight
+                + totalBolusInsulinNormalized * totalBolusInsulinWeight
+                + basalInsulinNormalized + basalInsulinWeight
+                + initialHypoNormalized * initialHypoWeight
+                + initialHyperNormalized * initialHyperWeight
+                ) / weights; // 0..1
+            
 
-            var weights = hypoWeight + hyperWeight + totalInsulinWeight + amplitudeWeight;
-
-            return (hypoNormalized * hypoWeight
-                + hyperNormalized * hyperWeight
-                + totalInsulinNormalized * totalInsulinWeight
-                + amplitudeNormalized * amplitudeWeight) / weights; // 0..1
+            // Interesting values we've ended up on (2024-07-23):
+            //
+            // OLD FITNESS FUNCTION
+            // 15 / 29,1,18
+            // 16 / 28,1,19
+            // 15 / 27,4,19
+            // 17 / 23,6,18
+            // 29 / 16,4,8 
+            //
+            // NEW FITNESS FUNCTION:
         }
     }
     internal class GeneticSearch
     {
         public GeneticAlgorithm ga;
         private Simulation.Input input;
+        private Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new IntakesSameAmount());
 
         public GeneticSearch(Simulation.Input input_)
         {
             input = input_;
 
-            Dictionary<List<Simulation.Intake>, double> fitnessCache = new(new IntakesSameAmount());
-
-            var selection = new EliteSelection();
+            var selection = new EliteSelection(5);
             var crossover = new UniformCrossover();
-            var mutation = new FlipBitMutation();
+            var mutation = new UniformMutation();
             var fitness = new FuncFitness((c) =>
             {
                 var fc = c as FloatingPointChromosome;
@@ -86,10 +106,12 @@ namespace mdi_simulator
                 Enumerable.Repeat(6, amountsCount).ToArray(),
                 Enumerable.Repeat(0, amountsCount).ToArray()
             );
-            var population = new Population(50, 100, chromosome);
+            var population = new Population(128, 256, chromosome);
+            population.GenerationStrategy = new PerformanceGenerationStrategy();
 
             ga = new GeneticAlgorithm(population, fitness, selection, crossover, mutation);
-            ga.Termination = new FitnessStagnationTermination(100);
+            ga.TaskExecutor = new ParallelTaskExecutor { MinThreads = 1, MaxThreads = 8 };
+            ga.Termination = new FitnessStagnationTermination(50);
         }
 
         private static List<Simulation.Intake> IntakeAmountsFromChromosome(Simulation.Input input, FloatingPointChromosome c)

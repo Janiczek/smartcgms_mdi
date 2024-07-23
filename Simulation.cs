@@ -85,7 +85,7 @@ namespace mdi_simulator
 
         public static List<OutputRow> Simulate(Input input, uint days)
         {
-            string logFile = "testlog.txt";
+            string logFile = "NUL";
             List<OutputRow> output = [];
             SCGMS_Game game = new(1, 1, 60 * 1000, logFile);
 
